@@ -1,0 +1,11 @@
+{
+  "codeowners": ["@ek5932"],
+  "config_flow": false,
+  "dependencies": [],
+  "documentation": "https://github.com/ek5932/jg_aura_ha",
+  "domain": "jg_aura",
+  "iot_class": "cloud_polling",
+  "name": "JGAura Thermostat Integration",
+  "requirements": [],
+  "version": "1.0.0"
+}
