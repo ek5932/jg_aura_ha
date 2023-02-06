@@ -1,4 +1,5 @@
-# jg_aura_ha
+# John Guest Aura Home Assistant integration
+## Installation
 Clone the repo and copy the contents of custom_components.
 Add the following to your configuration.yaml
 
