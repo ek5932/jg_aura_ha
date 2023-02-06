@@ -28,4 +28,9 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
 		CONF_EMAIL: config[DOMAIN][CONF_EMAIL],
 		CONF_PASSWORD: config[DOMAIN][CONF_PASSWORD]
 	}, config)
+	load_platform(hass, 'switch', DOMAIN, {
+		CONF_HOST: config[DOMAIN][CONF_HOST],
+		CONF_EMAIL: config[DOMAIN][CONF_EMAIL],
+		CONF_PASSWORD: config[DOMAIN][CONF_PASSWORD]
+	}, config)
 	return True

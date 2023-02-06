@@ -47,7 +47,7 @@ async def async_setup_platform(
 	client = jg_client.JGClient(host, email, password)
 
 	async def async_update_data():
-		return await client.GetDevices()
+		return await client.GetThermostats()
 
 	def find_thermostat_data(id):
 		for t in coordinator.data.thermostats:
@@ -77,6 +77,7 @@ async def async_setup_platform(
 		jgt = JGAuraThermostat(coordinator, client, coordinator.data.id, thermostat.id, thermostat.name, thermostat.on)
 		jgt.setValues(thermostat)
 		thermostatEntities.append(jgt)
+
 	async_add_entities(thermostatEntities)
 
 
@@ -88,7 +89,7 @@ class JGAuraThermostat(CoordinatorEntity, ClimateEntity):
 		self._id = id
 		self._client = client
 
-		self._attr_unique_id = "jg_aura-" + id
+		self._attr_unique_id = "jg_aura-" + str(id)
 		self._attr_icon = "mdi:temperature-celsius"
 
 		self._name = name
@@ -100,7 +101,7 @@ class JGAuraThermostat(CoordinatorEntity, ClimateEntity):
 		
 		self._hvac_list = [HVAC_MODE_OFF, HVAC_MODE_HEAT]
 		self._support_flags = SUPPORT_TARGET_TEMPERATURE | SUPPORT_PRESET_MODE
-		self._preset_mode = "LOW"
+		self._preset_mode = "Low"
 
 	@property
 	def id(self):
@@ -149,7 +150,7 @@ class JGAuraThermostat(CoordinatorEntity, ClimateEntity):
 
 	@property
 	def preset_modes(self):
-		return ["High", "Medium", "Low", PRESET_AWAY]
+		return ["High", "Low", "Away"]
 	
 	@property
 	def supported_features(self):
@@ -161,11 +162,11 @@ class JGAuraThermostat(CoordinatorEntity, ClimateEntity):
 			return
 
 		self._target_temp = temperature
-		await self._client.SetTemprature(self._id, temperature)
+		await self._client.SetThermostatTemprature(self._id, temperature)
 
 	async def async_set_preset_mode(self, preset_mode):
 		self._preset_mode = preset_mode
-		await self._client.SetPreset(self._id, preset_mode)
+		await self._client.SetThermostatPreset(self._id, preset_mode)
 
 	def setValues(self, thermostat: thermostat.Thermostat):
 		self._current_temp = thermostat.tempCurrent

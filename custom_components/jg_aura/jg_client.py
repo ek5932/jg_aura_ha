@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import urllib
 from datetime import datetime
@@ -5,6 +6,7 @@ import logging
 import xml.etree.ElementTree as ET
 import aiohttp
 from . import thermostat
+from . import hotwater
 from . import httpClient
 from . import gateway
 
@@ -12,24 +14,24 @@ _LOGGER = logging.getLogger(__name__)
 
 APPID = "1097"
 RUN_MODES = [
-    "AUTO", 
-    "HIGH", 
-    "MEDIUM", 
-    "LOW", 
-    "PARTY",
-    "AWAY", 
-    "FROST",
+    "Auto", 
+    "High", 
+    "High", 
+    "Low", 
+    "High",
+    "Away", 
+    "Frost",
     ]
 MODES = [
 	"OFFLINE",
 	"AUTO_HIGH",
 	"AUTO_MEDIUM",
 	"AUTO_LOW",
-	"HIGH",
-	"MEDIUM",
-	"LOW",
-	"PARTY",
-	"AWAY",
+	"High",
+	"High",
+	"Low",
+	"High",
+	"Away",
 	"FROST",
 	"ON",
 	"ON",
@@ -40,12 +42,12 @@ MODES = [
 	"AUTO_HIGH",
 	"AUTO_MEDIUM",
 	"AUTO_LOW",
-	"HIGH",
-	"MEDIUM",
-	"LOW",
-	"PARTY",
-	"AWAY",
-	"FROST",
+	"High",
+	"High",
+	"Low",
+	"High",
+	"Away",
+	"Frost",
 	"ON",
 ]
 
@@ -66,20 +68,30 @@ class JGClient:
         _LOGGER.info(f'Connected to device "{self.gatewayDeviceId}"')
         self.loggedIn = True
 
-    async def GetDevices(self):
+    async def GetThermostats(self):
         if not self.loggedIn:
             await self.__login()
-        return await self.__requestDevices()
+        return await self.__requestDevices(self.__extractThermostats)
 
-    async def SetPreset(self, deviceId, stateName):
+    async def GetHotWater(self):
+        if not self.loggedIn:
+            await self.__login()
+        return await self.__requestDevices(self.__extractHotWater)
+
+    async def SetThermostatPreset(self, deviceId, stateName):
         if not self.loggedIn:
             await self.__login()
         return await self.__setPreset(deviceId, stateName)
 
-    async def SetTemprature(self, deviceId, temperature):
+    async def SetThermostatTemprature(self, deviceId, temperature):
         if not self.loggedIn:
             await self.__login()
         return await self.__setTemprature(deviceId, temperature)
+
+    async def SetHotWater(self, deviceId, is_on):
+        if not self.loggedIn:
+            await self.__login()
+        return await self.__setHotWater(deviceId, is_on)
 
     async def __requestGatewayDeviceId(self):
         loginUrl = f'{self.host}/userLogin?appId={APPID}&name={self.email}&password={self.hashedPassword}&timestamp={self.__getDate()}'
@@ -90,16 +102,16 @@ class JGClient:
         result = await httpClient.callUrlWithRetry(deviceIdUrl)
         return self.__extractGatewayDeviceId(result)
 
-    async def __requestDevices(self):
+    async def __requestDevices(self, parseFunction):
         url = f'{self.host}/setMultiDeviceAttributes2?secToken={self.securityToken}&devId={self.gatewayDeviceId}&name1=B01&value1=5&timestamp={self.__getDate()}'  
         await self.__fetchUrlWithLoginRetry(url)
         
         url = f'{self.host}/getDeviceAttributesWithValues?secToken={self.securityToken}&devId={self.gatewayDeviceId}&deviceTypeId=1&timestamp={self.__getDate()}'  
         responseContent = await self.__fetchUrlWithLoginRetry(url)
-        return self.__extractDeviceInfo(responseContent)
+        return parseFunction(responseContent)
 
     async def __setPreset(self, deviceId, stateName):
-        payload = urllib.parse.quote(f'!{deviceId}{chr(int(RUN_MODES.index(stateName.upper()) + 35))}')
+        payload = urllib.parse.quote(f'!{deviceId}{chr(int(RUN_MODES.index(stateName) + 35))}')
         url = f'{self.host}/setMultiDeviceAttributes2?secToken={self.securityToken}&devId={self.gatewayDeviceId}&name1=B05&value1={payload}&timestamp={self.__getDate()}'
         result = await self.__fetchUrlWithLoginRetry(url)
         self.__validateOperationResponse(result)
@@ -107,6 +119,13 @@ class JGClient:
     async def __setTemprature(self, deviceId, temperature):
         payload = urllib.parse.quote(f'!{deviceId}{chr(int(temperature * 2 + 32))}')
         url = f'{self.host}/setMultiDeviceAttributes2?secToken={self.securityToken}&devId={self.gatewayDeviceId}&name1=B06&value1={payload}&timestamp={self.__getDate()}'
+        result = await self.__fetchUrlWithLoginRetry(url)
+        self.__validateOperationResponse(result)
+
+    async def __setHotWater(self, deviceId, is_on):
+        heating_state = '# ' if is_on else f'$ '
+        payload = urllib.parse.quote(f'!{deviceId}{heating_state}')
+        url = f'{self.host}/setMultiDeviceAttributes2?secToken={self.securityToken}&devId={self.gatewayDeviceId}&name1=B05&value1={payload}&timestamp={self.__getDate()}'
         result = await self.__fetchUrlWithLoginRetry(url)
         self.__validateOperationResponse(result)
 
@@ -141,7 +160,7 @@ class JGClient:
     def __getDate(self):
         return str(datetime.now().timestamp()).replace('.', '')
 
-    def __extractDeviceInfo(self, response):
+    def __extractThermostats(self, response):
         tree = ET.fromstring(response)
         try:
             items = []
@@ -180,6 +199,39 @@ class JGClient:
                             (ord(summary[3]) - 32) * 0.5))
             
             return gateway.Gateway('JG-Gateway', 'JG-Gateway', thermostats)
+
+        except Exception as e:
+            _LOGGER.error(f'Unexpected error processing results: {e}\n {response}')
+            raise
+
+    def __extractHotWater(self, response):
+        tree = ET.fromstring(response)
+        try:
+            items = []
+            for element in tree.findall("./attrList"):
+                items.append(
+                    {
+                        'Id':element.findtext("id"), 
+                        'Value':element.findtext("value")
+                                        .replace('&lt;','<')
+                                        .replace('&gt;','>')
+                                        .replace('&amp;', '&')
+                    })
+
+            hotWaterOn = False
+            hotWaterId = list(filter(lambda item: item.get('Id') == '2272', items))[0].get('Value').strip()
+            hotWaterId = hotWaterId[1:len(hotWaterId)-1]
+
+            ## '2569Q3 0' - on
+            ## '2569Q$ 0' - off
+            ## '2569Q! 0' - auto
+            summaryValue = list(filter(lambda item: item.get('Id') == '2257', items))[0].get('Value')
+            for element in [summaryValue[i:i+8] for i in range(0, len(summaryValue), 8)]:
+                if hotWaterId in element:
+                    hotWaterOn = element[0:len(hotWaterId) + 2].endswith('3')
+                    break
+
+            return hotwater.HotWater(hotWaterId, hotWaterOn)
 
         except Exception as e:
             _LOGGER.error(f'Unexpected error processing results: {e}\n {response}')
