@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, CONF_HOST
+from . import CONF_REFRESH_RATE
 from . import jg_client
 from . import thermostat
 from datetime import timedelta
@@ -42,7 +43,7 @@ async def async_setup_platform(
 	host = discovery_info[CONF_HOST]
 	email = discovery_info[CONF_EMAIL]
 	password = discovery_info[CONF_PASSWORD]
-	
+
 	thermostatEntities = []
 	client = jg_client.JGClient(host, email, password)
 
@@ -66,7 +67,7 @@ async def async_setup_platform(
 		_LOGGER,
 		name = "climate",
 		update_method = async_update_data,
-		update_interval = timedelta(seconds = 2)
+		update_interval = timedelta(seconds = discovery_info[CONF_REFRESH_RATE])
 	)
 
 	coordinator.async_add_listener(update_entities)
@@ -147,10 +148,9 @@ class JGAuraThermostat(CoordinatorEntity, ClimateEntity):
 	def preset_mode(self):
 		return self._preset_mode
 
-
 	@property
 	def preset_modes(self):
-		return ["High", "Low", "Away"]
+		return jg_client.RUN_MODES
 	
 	@property
 	def supported_features(self):
@@ -162,7 +162,7 @@ class JGAuraThermostat(CoordinatorEntity, ClimateEntity):
 			return
 
 		self._target_temp = temperature
-		await self._client.SetThermostatTemprature(self._id, temperature)
+		await self._client.SetThermostatTemperature(self._id, temperature)
 
 	async def async_set_preset_mode(self, preset_mode):
 		self._preset_mode = preset_mode
