@@ -15,38 +15,46 @@ _LOGGER = logging.getLogger(__name__)
 APPID = "1097"
 RUN_MODES = [
     "Auto", 
-    "High", 
-    "High", 
-    "Low", 
     "High",
-    "Away", 
-    "Frost",
+    "Medium",
+    "Low",
+    "Party",
+    "Away",
+    "Frost"
     ]
+RUN_MODES_WITH_DURATION = [
+    "Party",
+    "Away"
+    ]
+
+# There are more modes than actual presets. However, if a mode does not match a preset
+# HA can show the mode, but the preset is left blank. As such, make sure the values match
+# the 'preset' you want to display.
 MODES = [
 	"OFFLINE",
-	"AUTO_HIGH",
-	"AUTO_MEDIUM",
-	"AUTO_LOW",
+	"Auto", # Auto High
+	"Auto", # Auto Medium
+	"Auto", # Auto Low
 	"High",
-	"High",
+	"Medium",
 	"Low",
-	"High",
+	"Party",
 	"Away",
-	"FROST",
+	"Frost",
 	"ON",
 	"ON",
+	"UNDEFINED",
 	"UNDEFINED",
 	"UNDEFINED",
 	"UNDEFINED",
 	"OFFLINE",
-	"AUTO_HIGH",
-	"AUTO_MEDIUM",
-	"AUTO_LOW",
+	"Auto", # Auto High
+	"Auto", # Auto Medium
+	"Auto", # Auto Low
 	"High",
-	"High",
+	"Medium",
 	"Low",
-	"High",
-	"Away",
+	"Party",
 	"Frost",
 	"ON",
 ]
@@ -83,10 +91,10 @@ class JGClient:
             await self.__login()
         return await self.__setPreset(deviceId, stateName)
 
-    async def SetThermostatTemprature(self, deviceId, temperature):
+    async def SetThermostatTemperature(self, deviceId, temperature):
         if not self.loggedIn:
             await self.__login()
-        return await self.__setTemprature(deviceId, temperature)
+        return await self.__setTemperature(deviceId, temperature)
 
     async def SetHotWater(self, deviceId, is_on):
         if not self.loggedIn:
@@ -111,12 +119,15 @@ class JGClient:
         return parseFunction(responseContent)
 
     async def __setPreset(self, deviceId, stateName):
-        payload = urllib.parse.quote(f'!{deviceId}{chr(int(RUN_MODES.index(stateName) + 35))}')
+        # Currently duration cannot be passed, hard code it to 1. It is a 2-char padded string
+        duration = str(1).zfill(2) if stateName in RUN_MODES_WITH_DURATION else ""
+
+        payload = urllib.parse.quote(f'!{deviceId}{chr(int(RUN_MODES.index(stateName) + 35))}{duration}')
         url = f'{self.host}/setMultiDeviceAttributes2?secToken={self.securityToken}&devId={self.gatewayDeviceId}&name1=B05&value1={payload}&timestamp={self.__getDate()}'
         result = await self.__fetchUrlWithLoginRetry(url)
         self.__validateOperationResponse(result)
 
-    async def __setTemprature(self, deviceId, temperature):
+    async def __setTemperature(self, deviceId, temperature):
         payload = urllib.parse.quote(f'!{deviceId}{chr(int(temperature * 2 + 32))}')
         url = f'{self.host}/setMultiDeviceAttributes2?secToken={self.securityToken}&devId={self.gatewayDeviceId}&name1=B06&value1={payload}&timestamp={self.__getDate()}'
         result = await self.__fetchUrlWithLoginRetry(url)
@@ -163,32 +174,38 @@ class JGClient:
     def __extractThermostats(self, response):
         tree = ET.fromstring(response)
         try:
+            # The names of the thermostats are stored under the 'Name' nodes.
+            thermostatDisplayNodeNames = ['S02', 'S03']
+
+            # A device supports up to 30 thermostats, with up to 3 nodes containing
+            # their summaries (10 each). They are identified by keyed names
+            summaryNodeNames = ['001', '002', '003']
+
             items = []
             for element in tree.findall("./attrList"):
-                items.append(
-                    {
-                        'Id':element.findtext("id"), 
+                name = element.findtext("name")
+                if name in thermostatDisplayNodeNames or name in summaryNodeNames:
+                    items.append({
+                        'Id':element.findtext("id"),
+                        'Name': name,
                         'Value':element.findtext("value")
                                         .replace('&lt;','<')
                                         .replace('&gt;','>')
                                         .replace('&amp;', '&')
                     })
 
-            sumaries = []
-            summaryValue = list(filter(lambda item: item.get('Id') == '2257', items))[0].get('Value')
-            for element in [summaryValue[i:i+8] for i in range(0, len(summaryValue), 8)]:
-                if(len(element) == 8):
-                    sumaries.append({ 
-                        'Id': element[0:4], 
-                        'Summary': element[4:] 
-                    })
+            summaries = {}
+            for entryValue in (x.get('Value') for x in items if x.get('Name') in summaryNodeNames):
+                for element in (entryValue[i:i+8] for i in range(0, len(entryValue), 8)):
+                    if len(element) == 8:
+                        id = element[0:4]
+                        summaries[id] = element[4:]
         
             thermostats = []
-            for element in list(filter(lambda item: item.get('Id') == '2287', items))[0].get('Value').split(','):
-                if(len(element) > 4):
+            for entryValue in (x.get('Value') for x in items if x.get('Name') in thermostatDisplayNodeNames):
+                for element in (x for x in entryValue.split(',') if len(x) > 4):
                     id = element[0:4]
-                    summary = list(filter(lambda item: item.get('Id') == id, sumaries))[0].get('Summary')
-
+                    summary = summaries[id]
                     thermostats.append(
                         thermostat.Thermostat(
                             id, 
